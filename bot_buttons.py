@@ -2,7 +2,7 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Conve
 
 import config
 import dump
-dw = dump.Wrapper(csvpath='/Users/mayakorotkaya/prozh_master/prozhito-dump-1')
+dw = dump.Wrapper(csvpath=config.dumppath)
 
 import logging
 from telegram import (ReplyKeyboardMarkup, ReplyKeyboardRemove)
@@ -32,11 +32,11 @@ def author(update, context):
     return TYPING_REPLY
 
 def interval (update, context):
+    print('interval')
     text = update.message.text
     context.user_data['choice'] = text
     update.message.reply_text(
         'Вы решили посмотреть дневники по периоду. Введите период в формате чч.мм.гг - чч.мм.гг.')
-
     return TYPING_REPLY
 
 def help(update, context):
@@ -74,13 +74,15 @@ def interval1(update, context):
     month2 = int(second_date[1])
     day2 = int(second_date[0])
 
-    M = dw.notes[(year1, month1, day1): (year2, month2, day2)]
-    for i in range(len(M)):
-        if len(M[i].text) > 4096:
-            for x in range(0, len(M[i].text), 4096):
-                context.bot.send_message(text='{}'.format(M[i].text[x:x + 4096]))
+    notes_for_period = dw.notes[(year1, month1, day1): (year2, month2, day2)]
+    for note in notes_for_period:
+        if len(note.text) > 4096:
+            for x in range(0, len(note.text), 4096):
+                context.bot.send_message(chat_id=update.effective_message.chat_id,
+                                         text='{0}'.format(note.text[x:x + 4096]))
         else:
-            context.bot.send_message(text='{}'.format(text=M[i].text))
+            context.bot.send_message(chat_id=update.effective_message.chat_id,
+                                     text='{0}'.format(note.text))
 
     return CHOOSING
 
