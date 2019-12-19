@@ -1,0 +1,3 @@
+[submodule "prozhito-tools"]
+	path = prozhito_tools
+	url = https://github.com/destabilizer/prozhito-tools
