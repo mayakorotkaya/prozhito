@@ -16,6 +16,7 @@ CHOOSING, TYPING_REPLY = range(2)
 
 user_subscriptions = {}
 
+MAXLENGTH = 4096
 
 def start(update, context):
     reply_keyboard = [['Выбрать по автору'], ['Выбрать по периоду'], ['Помочь нам']]
@@ -32,15 +33,15 @@ def author(update, context):
     update.message.reply_text(
         'Вы решили посмотреть дневники по автору. Введите имя автора в формате ИОФ')
 
-    return TYPING_REPLY
+    return AUTHOR_REPLY
 
-def interval (update, context):
+def interval(update, context):
     text = update.message.text
     context.user_data['choice'] = text
     update.message.reply_text(
         'Вы решили посмотреть дневники по периоду. Введите период в формате чч.мм.гг - чч.мм.гг.')
 
-    return TYPING_REPLY
+    return INTERVAL_REPLY
 
 def help(update, context):
     text = update.message.text
@@ -48,7 +49,7 @@ def help(update, context):
     update.message.reply_text(
         'Большинство дневников сайта Прожито не имеют семантической разметки. Вы могли бы помочь нам, присвоив тег одному из дневников.')
 
-    return TYPING_REPLY
+    return CHOOSING_REPLY
 
 def received_information(update, context):
     text = update.message.text
@@ -79,37 +80,35 @@ def interval1(update, context):
 
     notes_for_period = dw.notes[(year1, month1, day1): (year2, month2, day2)]
     for note in notes_for_period:
-        if len(note.text) > 4096:
-            for x in range(0, len(note.text), 4096):
+        if len(note.text) > MAXLENGTH:
+            for x in range(0, len(note.text), MAXLENGTH):
                 context.bot.send_message(chat_id=update.effective_message.chat_id,
-                                         text='{0}'.format(note.text[x:x + 4096]))
+                                         text='{0}'.format(note.text[x:x + MAXLENGTH]))
         else:
             context.bot.send_message(chat_id=update.effective_message.chat_id,
                                      text='{0}'.format(note.text))
+    return CHOOSING
 
 def author1(update, context):
     author_name = update.message.text
-    authorID = 0
-    for i in filter(lambda a: author_name in a.name, dw.authors.authors_list):
-        authorID = i.ID
-    A = dw.diaries.diaries_list
-    for i in range(len(A)):
-        if A[i].author_ID == authorID:
-            for z in A[i].notes:
-                if len(z.text) > 4096:
-                    for x in range(0, len(z.text), 4096):
-                        context.bot.send_message(
-                            text='{}'.format(z.text[x:x + 4096]))
-                else:
-                    context.bot.send_message(text='{}'.format(text=z.text))
-
-
+    matched_authors = filter(lambda a: author_name in a.name, dw.authors.authors_list)
+    try:
+        author = next(matched_authors)
+    except StopIteration:
+        update.message.reply_text("Увы, мы не нашли такого автора :(")
+        return CHOOSING
+    for note in author.notes[:5]:
+        if len(note.text) > MAXLENGTH:
+            for x in range(0, len(note.text), MAXLENGTH):
+                context.bot.send_message(chat_id=update.effective_message.chat_id,
+                                         text='{0}'.format(note.text[x:x + MAXLENGTH]))
+        else:
+            context.bot.send_message(chat_id=update.effective_message.chat_id,
+                                     text='{0}'.format(note.text))
     return CHOOSING
 
 def error(update, context):
     logger.warning('Update "%s" caused error "%s"', update, context.error)
-
-
 
 def main():
     from telegram import Bot
@@ -132,11 +131,10 @@ def main():
                        MessageHandler(Filters.regex('^Помочь нам$'), #потом опять - по периоду или по автору, под сообщением кнопка добавить тэг персона, по геотэгу или по смыслу, дальше свободное текстовое поле (после этого добавить еще или следюущая запись) -
                                       help)
                        ],
-            TYPING_REPLY: [MessageHandler(Filters.regex(r'\d\d?\.\d\d?\.\d\d\d\d - \d\d?\.\d\d?\.\d\d\d\d'),
-                                      interval1),
-                           MessageHandler(Filters.regex('[А-Яа-я]*'),
-                                          author1)
-                           ]
+            INTERVAL_REPLY: [MessageHandler(Filters.regex(r'\d\d?\.\d\d?\.\d\d\d\d - \d\d?\.\d\d?\.\d\d\d\d'),
+                                            interval1)],
+
+            AUTHOR_REPLY:  [MessageHandler(Filters.regex('[А-Яа-я]*'), author1)]
         },
 
         fallbacks=[CommandHandler('cancel', cancel)]
