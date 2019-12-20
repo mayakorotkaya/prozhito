@@ -6,20 +6,33 @@ dw = dump.Wrapper(csvpath=config.dumppath)
 
 import logging
 from telegram import (ReplyKeyboardMarkup, ReplyKeyboardRemove)
+import random
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     level=logging.INFO)
 
 logger = logging.getLogger(__name__)
 
-CHOOSING, TYPING_REPLY = range(2)
+CHOOSING, INTERVAL_REPLY, AUTHOR_REPLY, MARKUP = range(4)
 
 user_subscriptions = {}
+workingNote = {}
 
 MAXLENGTH = 4096
 
+markupMode = False
+
+w = open("tags.csv", "w")
+
+def send_message_splitly(bot, msg, chat_id):
+    if len(msg) > MAXLENGTH:
+            for x in range(0, len(note.text), MAXLENGTH):
+                bot.send_message(chat_id=chat_id, text=msg[x:x + MAXLENGTH])
+    else:
+        bot.send_message(chat_id=chat_id, text=msg)
+
 def start(update, context):
-    reply_keyboard = [['Выбрать по автору'], ['Выбрать по периоду'], ['Помочь нам']]
+    reply_keyboard = [['Выбрать по автору'], ['Выбрать по периоду'], ['Размечать']]
     context.bot.send_message(chat_id=update.effective_message.chat_id, text="Привет, я чат-бот сайта Прожито. "
                                                                                 "Сайт посвящен дневниковым записям 18-20 веков."
                                                                                 "Какие дневники вы бы хотели почитать? "
@@ -31,8 +44,7 @@ def author(update, context):
     text = update.message.text
     context.user_data['choice'] = text
     update.message.reply_text(
-        'Вы решили посмотреть дневники по автору. Введите имя автора в формате ИОФ')
-
+        'Вы решили посмотреть дневники по автору. Введите имя автора')
     return AUTHOR_REPLY
 
 def interval(update, context):
@@ -44,12 +56,17 @@ def interval(update, context):
     return INTERVAL_REPLY
 
 def help(update, context):
+    global markupMode
     text = update.message.text
     context.user_data['choice'] = text
-    update.message.reply_text(
-        'Большинство дневников сайта Прожито не имеют семантической разметки. Вы могли бы помочь нам, присвоив тег одному из дневников.')
-
-    return CHOOSING_REPLY
+    reply_keyboard = [['Выбрать по автору'], ['Выбрать по периоду']]
+    context.bot.send_message(chat_id = update.effective_message.chat_id,
+                             text = 'Большинство дневников сайта Прожито не имеют семантической разметки. ' +\
+                             'Вы могли бы помочь нам, присвоив тег одному из дневников. Вы хотите получить ' +\
+                             'запись из определенного периода или определенного автора?',
+                             reply_markup = ReplyKeyboardMarkup(reply_keyboard, True) )
+    markupMode = True
+    return CHOOSING
 
 def received_information(update, context):
     text = update.message.text
@@ -91,21 +108,38 @@ def interval1(update, context):
 
 def author1(update, context):
     author_name = update.message.text
-    matched_authors = filter(lambda a: author_name in a.name, dw.authors.authors_list)
+    matched_authors = filter(lambda a: author_name.lower() in a.name.lower(), dw.authors.authors_list)
     try:
         author = next(matched_authors)
     except StopIteration:
         update.message.reply_text("Увы, мы не нашли такого автора :(")
         return CHOOSING
-    for note in author.notes[:5]:
-        if len(note.text) > MAXLENGTH:
-            for x in range(0, len(note.text), MAXLENGTH):
-                context.bot.send_message(chat_id=update.effective_message.chat_id,
-                                         text='{0}'.format(note.text[x:x + MAXLENGTH]))
-        else:
-            context.bot.send_message(chat_id=update.effective_message.chat_id,
-                                     text='{0}'.format(note.text))
+    note = random.choice(author.notes)
+    send_message_splitly(bot=context.bot,
+                         chat_id=update.effective_message.chat_id,
+                         msg='{0}\n{1}'.format(note.text, note.meta))
+    if markupMode:
+        update.message.reply_text("Это случайная запись из дневника автора " + author_name + ". Пришлите в ответ сообщение с правильным тэгом для этой записи.")
+        workingNote[update.message.from_user.username] = note
+        return MARKUP
+    else:
+        return CHOOSING
+        #for note in author.notes[:5]:
+        #   if len(note.text) > MAXLENGTH:
+        #       for x in range(0, len(note.text), MAXLENGTH):
+        #           context.bot.send_message(chat_id=update.effective_message.chat_id,
+        #                                    text='{0}'.format(note.text[x:x + MAXLENGTH]))
+        #   else:
+        #       context.bot.send_message(chat_id=update.effective_message.chat_id,
+        #                                text='{0}'.format(note.text))
+        
+        
+
+def thanks_for_markup(update,context):
+    w.write('"' + update.message.text + '",#"'+workingNote[update.message.from_user.username]+ '"')
+    update.message.reply_text("Спасибо! Мы занесли этот тэг в базу. Можете вернуться к чтению или продолжить разметку.")
     return CHOOSING
+
 
 def error(update, context):
     logger.warning('Update "%s" caused error "%s"', update, context.error)
@@ -128,13 +162,15 @@ def main():
                                       author),
                        MessageHandler(Filters.regex('^Выбрать по периоду$'), #дальше варианты выдачи (1 или 10 или файлом или регулярная подписка; Если подписка то выбрать частотность)
                                       interval),
-                       MessageHandler(Filters.regex('^Помочь нам$'), #потом опять - по периоду или по автору, под сообщением кнопка добавить тэг персона, по геотэгу или по смыслу, дальше свободное текстовое поле (после этого добавить еще или следюущая запись) -
+                       MessageHandler(Filters.regex('^Размечать$'), #потом опять - по периоду или по автору, под сообщением кнопка добавить тэг персона, по геотэгу или по смыслу, дальше свободное текстовое поле (после этого добавить еще или следюущая запись) -
                                       help)
                        ],
             INTERVAL_REPLY: [MessageHandler(Filters.regex(r'\d\d?\.\d\d?\.\d\d\d\d - \d\d?\.\d\d?\.\d\d\d\d'),
                                             interval1)],
 
-            AUTHOR_REPLY:  [MessageHandler(Filters.regex('[А-Яа-я]*'), author1)]
+            AUTHOR_REPLY:  [MessageHandler(Filters.regex('[А-Яа-я]*'), author1)],
+            
+            MARKUP: [MessageHandler(Filters.text,thanks_for_markup)]
         },
 
         fallbacks=[CommandHandler('cancel', cancel)]
